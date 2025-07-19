@@ -72,13 +72,15 @@ export default function AutoVoiceQuizGame() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animationFrameRef = useRef<number | null>(null)
-
+  
   const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "AIzaSyAPvOPgh2vPz1uxDhAMs0veZrqTv7p-2So"
 
   useEffect(() => {
     if ("speechSynthesis" in window) {
       synthRef.current = window.speechSynthesis
     }
+
+    console.log(`the index from usestate is ${currentQuestionIndex}`)
 
     return () => {
       cleanupResources()
@@ -201,7 +203,7 @@ export default function AutoVoiceQuizGame() {
 
       mediaRecorderRef.current.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
-        await processAudioWithGemini(audioBlob)
+        // await processAudioWithGemini(audioBlob)
         stream.getTracks().forEach(track => track.stop())
         if (audioContextRef.current) {
           audioContextRef.current.close().catch(console.error)
@@ -252,75 +254,75 @@ export default function AutoVoiceQuizGame() {
     }
   }
 
-  const processAudioWithGemini = async (audioBlob: Blob) => {
-    if (!GEMINI_API_KEY) {
-      alert('Please set your Gemini API key in environment variables')
-      return
-    }
+  // const processAudioWithGemini = async (audioBlob: Blob) => {
+  //   if (!GEMINI_API_KEY) {
+  //     alert('Please set your Gemini API key in environment variables')
+  //     return
+  //   }
 
-    setIsProcessing(true)
+  //   setIsProcessing(true)
 
-    try {
-      const arrayBuffer = await audioBlob.arrayBuffer()
-      const base64Audio = btoa(
-        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-      )
+  //   try {
+  //     const arrayBuffer = await audioBlob.arrayBuffer()
+  //     const base64Audio = btoa(
+  //       new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+  //     )
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: "Please transcribe this audio and extract only the spoken words. If it's a quiz answer, identify if they said 'yes', 'no', or mentioned any of these options: A, B, C, or specific words like 'Paris', 'London', 'Rome', 'Moo', 'Meow', 'Woof'. Return only the key words in lowercase."
-                },
-                {
-                  inline_data: {
-                    mime_type: "audio/webm",
-                    data: base64Audio
-                  }
-                }
-              ]
-            }
-          ]
-        })
-      })
+  //     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+  //       method: 'POST',
+  //       headers: {
+  //         'Content-Type': 'application/json',
+  //       },
+  //       body: JSON.stringify({
+  //         contents: [
+  //           {
+  //             parts: [
+  //               {
+  //                 text: "Please transcribe this audio and extract only the spoken words. If it's a quiz answer, identify if they said 'yes', 'no', or mentioned any of these options: A, B, C, or specific words like 'Paris', 'London', 'Rome', 'Moo', 'Meow', 'Woof'. Return only the key words in lowercase."
+  //               },
+  //               {
+  //                 inline_data: {
+  //                   mime_type: "audio/webm",
+  //                   data: base64Audio
+  //                 }
+  //               }
+  //             ]
+  //           }
+  //         ]
+  //       })
+  //     })
 
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`)
-      }
+  //     if (!response.ok) {
+  //       throw new Error(`API request failed with status ${response.status}`)
+  //     }
 
-      const data = await response.json()
+  //     const data = await response.json()
 
-      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        const transcription = data.candidates[0].content.parts[0].text.toLowerCase().trim()
-        setLastHeardCommand(transcription)
-        handleVoiceCommand(transcription)
-      } else {
-        console.error('No transcription received from Gemini')
-        setLastHeardCommand("Could not understand audio")
-        setTimeout(() => {
-          if (gameState === "playing") {
-            startRecording()
-          }
-        }, 2000)
-      }
-    } catch (error) {
-      console.error('Error processing audio with Gemini:', error)
-      setLastHeardCommand("Error processing audio")
-      setTimeout(() => {
-        if (gameState === "playing") {
-          startRecording()
-        }
-      }, 2000)
-    } finally {
-      setIsProcessing(false)
-    }
-  }
+  //     if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+  //       const transcription = data.candidates[0].content.parts[0].text.toLowerCase().trim()
+  //       setLastHeardCommand(transcription)
+  //       handleVoiceCommand(transcription)
+  //     } else {
+  //       console.error('No transcription received from Gemini')
+  //       setLastHeardCommand("Could not understand audio")
+  //       setTimeout(() => {
+  //         if (gameState === "playing") {
+  //           startRecording()
+  //         }
+  //       }, 2000)
+  //     }
+  //   } catch (error) {
+  //     console.error('Error processing audio with Gemini:', error)
+  //     setLastHeardCommand("Error processing audio")
+  //     setTimeout(() => {
+  //       if (gameState === "playing") {
+  //         startRecording()
+  //       }
+  //     }, 2000)
+  //   } finally {
+  //     setIsProcessing(false)
+  //   }
+  // }
 
   const handleVoiceCommand = (command: string) => {
     const currentQuestion = questions[currentQuestionIndex]
@@ -382,9 +384,9 @@ export default function AutoVoiceQuizGame() {
     setCurrentQuestionIndex(0)
     setScore(0)
     setIsCorrect(null)
-    // setTimeout(() => {
+    setTimeout(() => {
       readQuestion()
-    // }, 500)
+    }, 500)
   }
 
   // const readQuestion = () => {
@@ -427,6 +429,12 @@ export default function AutoVoiceQuizGame() {
     };
 
     speechSynthesis.speak(utterance);
+    console.log(`currentQuestion after~ ${JSON.stringify(currentQuestion)}`);
+
+    // if(isCorrect){
+
+    //   setCurrentQuestionIndex(currentQuestionIndex+1);
+    // }
   };
 
 
@@ -435,6 +443,7 @@ export default function AutoVoiceQuizGame() {
   }
 
   const handleAnswer = (answer: string) => {
+    
     const currentQuestion = questions[currentQuestionIndex]
     const correct = answer === currentQuestion.correctAnswer
     setIsCorrect(correct)
@@ -442,7 +451,6 @@ export default function AutoVoiceQuizGame() {
 
     if (correct) {
       setScore(score + 1)
-
       speak("Correct! Great job!")
       playCorrectSound()
 
