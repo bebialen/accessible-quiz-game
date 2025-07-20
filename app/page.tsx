@@ -72,7 +72,10 @@ export default function AutoVoiceQuizGame() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animationFrameRef = useRef<number | null>(null)
-  
+  const currentQuestionRef = useRef<Question | null>(null)
+  const currentQuestionIndexRef = useRef<number>(0)
+  const gameStateRef = useRef<string>("start")
+
   const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "AIzaSyAPvOPgh2vPz1uxDhAMs0veZrqTv7p-2So"
 
   useEffect(() => {
@@ -80,23 +83,40 @@ export default function AutoVoiceQuizGame() {
       synthRef.current = window.speechSynthesis
     }
 
-    console.log(`the index from usestate is ${currentQuestionIndex}`)
-
     return () => {
       cleanupResources()
     }
   }, [])
 
+  // Sync refs with state
+  useEffect(() => {
+    currentQuestionIndexRef.current = currentQuestionIndex
+    currentQuestionRef.current = questions[currentQuestionIndex]
+  }, [currentQuestionIndex])
+
+  useEffect(() => {
+    gameStateRef.current = gameState
+  }, [gameState])
+
   const cleanupResources = () => {
-    if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current)
-    if (autoProgressTimerRef.current) clearTimeout(autoProgressTimerRef.current)
-    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
+    if (recordingTimerRef.current) {
+      clearTimeout(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+    if (autoProgressTimerRef.current) {
+      clearTimeout(autoProgressTimerRef.current)
+      autoProgressTimerRef.current = null
+    }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
+    }
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop()
     }
 
-    if (audioContextRef.current) {
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.close().catch(console.error)
     }
 
@@ -105,13 +125,23 @@ export default function AutoVoiceQuizGame() {
     }
   }
 
-  const speak = (text: string, rate = 0.8) => {
+  const speak = (text: string, rate = 0.8, onEnd?: () => void) => {
     if (synthRef.current) {
       synthRef.current.cancel()
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.rate = rate
       utterance.pitch = 1.1
       utterance.volume = 0.8
+
+      if (onEnd) {
+        utterance.onend = onEnd
+      }
+
+      utterance.onerror = (e) => {
+        console.error('Speech error:', e)
+        if (onEnd) onEnd()
+      }
+
       synthRef.current.speak(utterance)
     }
   }
@@ -175,7 +205,7 @@ export default function AutoVoiceQuizGame() {
         if (analyserRef.current && isRecording) {
           analyserRef.current.getByteFrequencyData(dataArray)
           const average = dataArray.reduce((a, b) => a + b) / dataArray.length
-          setVoiceAmplitude(Math.min(average / 128, 2)) // Normalize to 0-2 range
+          setVoiceAmplitude(Math.min(average / 128, 2))
           animationFrameRef.current = requestAnimationFrame(updateAmplitude)
         }
       }
@@ -187,8 +217,12 @@ export default function AutoVoiceQuizGame() {
 
   const startRecording = async () => {
     try {
+      console.log('Starting recording...')
+
+      // Cleanup any existing recording
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        return
+        console.log('Stopping existing recording')
+        mediaRecorderRef.current.stop()
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -198,18 +232,27 @@ export default function AutoVoiceQuizGame() {
       setupAudioAnalyser(stream)
 
       mediaRecorderRef.current.ondataavailable = (event) => {
+        console.log('Audio data available:', event.data.size)
         audioChunksRef.current.push(event.data)
       }
 
       mediaRecorderRef.current.onstop = async () => {
+        console.log('Recording stopped, processing audio...')
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
-        // await processAudioWithGemini(audioBlob)
+        console.log('Audio blob size:', audioBlob.size)
+
+        // Clean up stream
         stream.getTracks().forEach(track => track.stop())
-        if (audioContextRef.current) {
+
+        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
           audioContextRef.current.close().catch(console.error)
           audioContextRef.current = null
         }
+
         setVoiceAmplitude(0)
+
+        // Process audio with Gemini
+        await processAudioWithGemini(audioBlob)
       }
 
       mediaRecorderRef.current.start()
@@ -217,10 +260,16 @@ export default function AutoVoiceQuizGame() {
       setRecordingTimeLeft(10)
       playRecordingStartSound()
 
+      // Clear any existing timer
+      if (recordingTimerRef.current) {
+        clearTimeout(recordingTimerRef.current)
+      }
+
       const timer = setInterval(() => {
         setRecordingTimeLeft(prev => {
           if (prev <= 1) {
             clearInterval(timer)
+            console.log('Recording timer finished, stopping recording')
             stopRecording()
             return 0
           }
@@ -229,112 +278,179 @@ export default function AutoVoiceQuizGame() {
       }, 1000)
 
       recordingTimerRef.current = timer
+
     } catch (error) {
       console.error('Error accessing microphone:', error)
       alert('Could not access microphone. Please check permissions.')
+      setIsRecording(false)
     }
   }
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    console.log('Stop recording called')
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      console.log('Actually stopping recording...')
       mediaRecorderRef.current.stop()
-      setIsRecording(false)
-      setRecordingTimeLeft(0)
-      playRecordingStopSound()
+    }
 
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current)
-        recordingTimerRef.current = null
-      }
+    setIsRecording(false)
+    setRecordingTimeLeft(0)
+    playRecordingStopSound()
 
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
     }
   }
 
-  // const processAudioWithGemini = async (audioBlob: Blob) => {
-  //   if (!GEMINI_API_KEY) {
-  //     alert('Please set your Gemini API key in environment variables')
-  //     return
-  //   }
+  const processAudioWithGemini = async (audioBlob: Blob) => {
+    console.log('Processing audio with Gemini...')
+    setIsProcessing(true)
 
-  //   setIsProcessing(true)
+    try {
+      if (audioBlob.size === 0) {
+        console.error('Audio blob is empty')
+        setLastHeardCommand('No audio recorded')
+        return
+      }
 
-  //   try {
-  //     const arrayBuffer = await audioBlob.arrayBuffer()
-  //     const base64Audio = btoa(
-  //       new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-  //     )
+      // Convert blob to base64
+      const base64Audio = await blobToBase64(audioBlob)
+      console.log('Audio converted to base64, length:', base64Audio.length)
 
-  //     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-  //       method: 'POST',
-  //       headers: {
-  //         'Content-Type': 'application/json',
-  //       },
-  //       body: JSON.stringify({
-  //         contents: [
-  //           {
-  //             parts: [
-  //               {
-  //                 text: "Please transcribe this audio and extract only the spoken words. If it's a quiz answer, identify if they said 'yes', 'no', or mentioned any of these options: A, B, C, or specific words like 'Paris', 'London', 'Rome', 'Moo', 'Meow', 'Woof'. Return only the key words in lowercase."
-  //               },
-  //               {
-  //                 inline_data: {
-  //                   mime_type: "audio/webm",
-  //                   data: base64Audio
-  //                 }
-  //               }
-  //             ]
-  //           }
-  //         ]
-  //       })
-  //     })
+      const currentQuestion = currentQuestionRef.current
+      if (!currentQuestion) {
+        console.error('No current question available')
+        return
+      }
 
-  //     if (!response.ok) {
-  //       throw new Error(`API request failed with status ${response.status}`)
-  //     }
+      // Create prompt for Gemini
+      let prompt = `You are processing audio from a quiz game. Listen to the audio and determine what the user said.
 
-  //     const data = await response.json()
+Current Question: "${currentQuestion.question}"
+Question Type: ${currentQuestion.type}
 
-  //     if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-  //       const transcription = data.candidates[0].content.parts[0].text.toLowerCase().trim()
-  //       setLastHeardCommand(transcription)
-  //       handleVoiceCommand(transcription)
-  //     } else {
-  //       console.error('No transcription received from Gemini')
-  //       setLastHeardCommand("Could not understand audio")
-  //       setTimeout(() => {
-  //         if (gameState === "playing") {
-  //           startRecording()
-  //         }
-  //       }, 2000)
-  //     }
-  //   } catch (error) {
-  //     console.error('Error processing audio with Gemini:', error)
-  //     setLastHeardCommand("Error processing audio")
-  //     setTimeout(() => {
-  //       if (gameState === "playing") {
-  //         startRecording()
-  //       }
-  //     }, 2000)
-  //   } finally {
-  //     setIsProcessing(false)
-  //   }
-  // }
+`
+
+      if (currentQuestion.type === "yesno") {
+        prompt += `The user should answer "yes" or "no". Listen for variations like "yeah", "yep", "nope", etc.
+Return ONLY one of: "yes" or "no"`
+      } else if (currentQuestion.type === "multiple" && currentQuestion.options) {
+        prompt += `The user should choose from these options:
+${currentQuestion.options.map((opt, idx) => `${String.fromCharCode(65 + idx)}. ${opt}`).join('\n')}
+
+The user might say the letter (A, B, C) or the actual option name.
+Return ONLY the option text in lowercase (like "${currentQuestion.options[0].toLowerCase()}" or "${currentQuestion.options[1]?.toLowerCase() || ''}")
+
+Available options: ${currentQuestion.options.map(opt => opt.toLowerCase()).join(', ')}`
+      }
+
+      prompt += `
+
+If the audio is unclear or you can't determine the answer, return "unclear".
+If the user says "repeat" or "again", return "repeat".
+
+Return only the parsed answer, nothing else.`
+
+      console.log('Sending request to Gemini API...')
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              {
+                inline_data: {
+                  mime_type: "audio/wav",
+                  data: base64Audio
+                }
+              }
+            ]
+          }]
+        })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`Gemini API error: ${response.status}`, errorText)
+        throw new Error(`Gemini API error: ${response.status}`)
+      }
+
+      const data = await response.json()
+      const geminiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toLowerCase()
+
+      console.log('Gemini response:', geminiResponse)
+      setLastHeardCommand(geminiResponse || 'No response')
+
+      if (geminiResponse) {
+        handleVoiceCommand(geminiResponse)
+      } else {
+        console.log('No valid response from Gemini')
+        // Allow user to try again after a short delay
+        setTimeout(() => {
+          if (gameStateRef.current === "playing") {
+            console.log('Restarting recording after no response')
+            startRecording()
+          }
+        }, 2000)
+      }
+
+    } catch (error) {
+      console.error('Error processing audio with Gemini:', error)
+      setLastHeardCommand('Error processing audio')
+
+      // Allow user to try again after error
+      setTimeout(() => {
+        if (gameStateRef.current === "playing") {
+          console.log('Restarting recording after error')
+          startRecording()
+        }
+      }, 2000)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        const base64String = reader.result as string
+        const base64Data = base64String.split(',')[1]
+        resolve(base64Data)
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
+  }
 
   const handleVoiceCommand = (command: string) => {
-    const currentQuestion = questions[currentQuestionIndex]
+    console.log('Handling voice command:', command)
+    const currentQuestion = currentQuestionRef.current
 
-    if (gameState === "start") {
+    if (!currentQuestion) {
+      console.error('No current question for voice command')
+      return
+    }
+
+    if (gameStateRef.current === "start") {
       if (command.includes("start") || command.includes("play") || command.includes("begin")) {
         startGame()
       }
       return
     }
 
-    if (gameState === "playing") {
+    if (gameStateRef.current === "playing") {
       if (command.includes("repeat") || command.includes("again")) {
         repeatQuestion()
         return
@@ -352,9 +468,16 @@ export default function AutoVoiceQuizGame() {
         }
       } else if (currentQuestion.type === "multiple" && currentQuestion.options) {
         const options = currentQuestion.options.map(opt => opt.toLowerCase())
-        if (command.includes("a") || options.some(opt => command.includes(opt))) {
-          const matchedOption = options.find(opt => command.includes(opt)) || options[0]
+
+        // Check for option names first
+        const matchedOption = options.find(opt => command.includes(opt))
+        if (matchedOption) {
           handleAnswer(matchedOption)
+          answered = true
+        }
+        // Check for letter choices
+        else if (command.includes("a") && options[0]) {
+          handleAnswer(options[0])
           answered = true
         } else if (command.includes("b") && options[1]) {
           handleAnswer(options[1])
@@ -365,9 +488,10 @@ export default function AutoVoiceQuizGame() {
         }
       }
 
-      if (!answered) {
+      if (!answered && command !== "unclear") {
+        console.log('Command not recognized, restarting recording')
         setTimeout(() => {
-          if (gameState === "playing") {
+          if (gameStateRef.current === "playing") {
             startRecording()
           }
         }, 2000)
@@ -380,6 +504,7 @@ export default function AutoVoiceQuizGame() {
       alert('Please set your Gemini API key in environment variables')
       return
     }
+    console.log('Starting game...')
     setGameState("playing")
     setCurrentQuestionIndex(0)
     setScore(0)
@@ -389,106 +514,97 @@ export default function AutoVoiceQuizGame() {
     }, 500)
   }
 
-  // const readQuestion = () => {
-  //   const currentQuestion = questions[currentQuestionIndex]
-
-  //   console.log(`currentQuestion ${currentQuestion}`);
-  //   const progressText = `Question ${currentQuestionIndex + 1} of ${questions.length}.`
-  //   console.log(`progress text ${progressText}`);
-  //   const questionText = currentQuestion.question
-
-  //   speak(`${progressText} ${questionText}`)
-
-  //   // setTimeout(() => {
-  //     startRecording()
-  //   // }, 5000)
-  // }
-
   const readQuestion = () => {
-    const currentQuestion = questions[currentQuestionIndex];
+    const questionIndex = currentQuestionIndexRef.current
+    const currentQuestion = questions[questionIndex]
 
-    console.log(`currentQuestion ${JSON.stringify(currentQuestion)}`);
-    const progressText = `Question ${currentQuestionIndex + 1} of ${questions.length}.`;
-    console.log(`progress text ${progressText}`);
-    const questionText = currentQuestion.question;
+    console.log('Reading question:', questionIndex)
 
-    const textToSpeak = `${progressText} ${questionText}`;
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
-    
+    const progressText = `Question ${questionIndex + 1} of ${questions.length}.`
+    let textToSpeak = `${progressText} ${currentQuestion.question}`
 
-    // ✅ Start recording only after speech is finished
-    utterance.onend = () => {
-      console.log("Speech has finished.");
-      startRecording();
-    };
+    if (currentQuestion.type === 'multiple' && currentQuestion.options) {
+      const optionsText = currentQuestion.options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join('. ')
+      textToSpeak += ` Your options are: ${optionsText}`
+    }
 
-    // Optional: log any speech errors
-    utterance.onerror = (e) => {
-      console.error("Speech error:", e);
-      startRecording(); // fallback
-    };
-
-    speechSynthesis.speak(utterance);
-    console.log(`currentQuestion after~ ${JSON.stringify(currentQuestion)}`);
-
-    // if(isCorrect){
-
-    //   setCurrentQuestionIndex(currentQuestionIndex+1);
-    // }
-  };
-
+    speak(textToSpeak, 0.9, () => {
+      console.log('Question reading finished, starting recording...')
+      // Ensure we are still in the playing state before starting to record
+      if (gameStateRef.current === "playing") {
+        setTimeout(() => {
+          startRecording()
+        }, 500) // Small delay to ensure speech has fully ended
+      }
+    })
+  }
 
   const repeatQuestion = () => {
+    console.log('Repeating question...')
     readQuestion()
   }
 
   const handleAnswer = (answer: string) => {
-    
-    const currentQuestion = questions[currentQuestionIndex]
+    console.log('Handling answer:', answer)
+    const currentQuestion = currentQuestionRef.current
+    if (!currentQuestion) return
+
     const correct = answer === currentQuestion.correctAnswer
     setIsCorrect(correct)
     setGameState("feedback")
 
     if (correct) {
-      setScore(score + 1)
-      speak("Correct! Great job!")
-      playCorrectSound()
-
-      autoProgressTimerRef.current = setTimeout(() => {
-        nextQuestion()
-      }, 3000)
-    } else {
-      speak("Not quite right, but good try!")
-      playIncorrectSound()
-
-      autoProgressTimerRef.current = setTimeout(() => {
-        nextQuestion()
-      }, 4000)
+      setScore(prevScore => prevScore + 1)
     }
 
+    // Speak feedback after a short delay
     setTimeout(() => {
-      speak(currentQuestion.explanation)
-    }, 2000)
+      if (correct) {
+        speak("Correct! Great job!", 0.8, () => {
+          speak(currentQuestion.explanation, 0.8, () => {
+            autoProgressTimerRef.current = setTimeout(() => {
+              nextQuestion()
+            }, 1000)
+          })
+        })
+        playCorrectSound()
+      } else {
+        speak("Not quite right, but good try!", 0.8, () => {
+          speak(currentQuestion.explanation, 0.8, () => {
+            autoProgressTimerRef.current = setTimeout(() => {
+              nextQuestion()
+            }, 1000)
+          })
+        })
+        playIncorrectSound()
+      }
+    }, 500)
   }
 
   const nextQuestion = () => {
+    const currentIndex = currentQuestionIndexRef.current
+    console.log('Moving to next question from:', currentIndex)
+
     if (autoProgressTimerRef.current) {
       clearTimeout(autoProgressTimerRef.current)
       autoProgressTimerRef.current = null
     }
 
-    if (currentQuestionIndex < questions.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1)
+    if (currentIndex < questions.length - 1) {
+      const newIndex = currentIndex + 1
+      setCurrentQuestionIndex(newIndex)
       setGameState("playing")
       setIsCorrect(null)
       setLastHeardCommand("")
+
+      // Small delay to ensure state has updated
       setTimeout(() => {
         readQuestion()
-      }, 500)
+      }, 100)
     } else {
       setGameState("complete")
       speak(
-        `Game complete! You got ${score + (isCorrect ? 1 : 0)} out of ${questions.length} questions correct. Great job!`,
+        `Game complete! You got ${score} out of ${questions.length} questions correct. Great job!`
       )
     }
   }
@@ -539,6 +655,7 @@ export default function AutoVoiceQuizGame() {
   }
 
   const resetGame = () => {
+    console.log('Resetting game...')
     cleanupResources()
     setGameState("start")
     setCurrentQuestionIndex(0)
@@ -547,6 +664,7 @@ export default function AutoVoiceQuizGame() {
     setLastHeardCommand("")
     setIsRecording(false)
     setRecordingTimeLeft(0)
+    setIsProcessing(false)
   }
 
   const currentQuestion = questions[currentQuestionIndex]
@@ -702,6 +820,7 @@ export default function AutoVoiceQuizGame() {
                 ))
               )}
             </div>
+
 
             {gameState === "feedback" && (
               <div className="text-center mt-8 space-y-4">
