@@ -16,42 +16,44 @@ interface Question {
 const questions: Question[] = [
   {
     id: 1,
-    question: "What is the capital of France?",
+    question: "What do you call a sleeping bull?",
     type: "multiple",
-    options: ["Paris", "London", "Rome"],
-    correctAnswer: "paris",
-    explanation: "Correct! Paris is the capital of France!",
+    options: ["Snore cow", "Bulldozer", "Moo nap", "Horn sleeper"],
+    correctAnswer: "bulldozer",
+    explanation: "Haha! A sleeping bull is a *bull-dozer*! Get it?",
   },
   {
     id: 2,
-    question: "Do cats like to play with yarn?",
+    question: "Can a kangaroo jump higher than a house?",
     type: "yesno",
     correctAnswer: "yes",
-    explanation: "Yes! Most cats love playing with yarn and string!",
+    explanation: "Yes! Because houses don’t jump at all!",
   },
   {
     id: 3,
-    question: "Can fish fly in the sky?",
-    type: "yesno",
-    correctAnswer: "no",
-    explanation: "No! Fish swim in water, not fly in the sky!",
+    question: "Why did the teddy bear skip dinner?",
+    type: "multiple",
+    options: ["It fell asleep", "It was stuffed", "It forgot", "It lost its spoon"],
+    correctAnswer: "It was stuffed",
+    explanation: "Correct! It was already stuffed — just like your tummy after a feast!",
   },
   {
     id: 4,
-    question: "What sound does a cow make?",
-    type: "multiple",
-    options: ["Meow", "Moo", "Woof"],
-    correctAnswer: "moo",
-    explanation: "Correct! Cows say 'Moo'!",
+    question: "Is your refrigerator running?",
+    type: "yesno",
+    correctAnswer: "yes",
+    explanation: "You better go catch it! 🏃‍♂️😂",
   },
   {
     id: 5,
-    question: "Is the sun hot?",
-    type: "yesno",
-    correctAnswer: "yes",
-    explanation: "Yes! The sun is very, very hot!",
+    question: "Why did the banana go to the doctor?",
+    type: "multiple",
+    options: ["It slipped", "It peeled weird", "It wasn’t peeling well", "It got too ripe"],
+    correctAnswer: "It wasn’t peeling well",
+    explanation: "Haha! Because it wasn’t *peeling* well!",
   },
-]
+];
+
 
 export default function AutoVoiceQuizGame() {
   const [gameState, setGameState] = useState<"start" | "playing" | "feedback" | "complete">("start")
