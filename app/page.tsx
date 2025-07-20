@@ -76,7 +76,7 @@ export default function AutoVoiceQuizGame() {
   const currentQuestionIndexRef = useRef<number>(0)
   const gameStateRef = useRef<string>("start")
 
-  const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "AIzaSyAPvOPgh2vPz1uxDhAMs0veZrqTv7p-2So"
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY 
 
   useEffect(() => {
     if ("speechSynthesis" in window) {
