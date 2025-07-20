@@ -1,5 +1,5 @@
 EduPlay: An Accessible Voice-First Quiz Game
-Welcome to EduPlay, an interactive quiz game designed with a core mission: to make learning accessible and engaging for users with visual impairments. Built for a hackathon, this Next.js application leverages the power of voice to create a completely hands-free and screen-reader-friendly educational experience.
+Welcome to EduPlay, an interactive quiz game designed with a core mission: to make learning accessible and engaging for users with visual impairments. Built for #CareHack coding challenge hackathon , this Next.js application leverages the power of voice to create a completely hands-free and screen-reader-friendly educational experience.
 
 🎯 Project Vision & Hackathon Goal
 The core idea behind this web application was to create a hands-free, accessible, and engaging quiz experience by integrating voice interaction into a traditional quiz format. Instead of relying on visual cues and UI interactions, our web app speaks out each question using text-to-speech, listens to the user's spoken response through speech recognition, and provides immediate audio feedback.
